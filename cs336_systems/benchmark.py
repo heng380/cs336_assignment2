@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 import yaml
 from pathlib import Path
 from cs336_basics.model import BasicsTransformerLM # type: ignore
+from cs336_basics.optimizer import AdamW, get_cosine_lr
 import torch.cuda.nvtx as nvtx
 import os
 from contextlib import nullcontext
@@ -32,7 +33,7 @@ def benchmark_model(
     forward_only: bool,
     device: str,
     autocast: bool
-) -> Tuple[float, float]:
+):
     """
     Benchmark the model's forward and backward passes.
     
@@ -47,22 +48,33 @@ def benchmark_model(
     Returns:
         Tuple of (forward_time, backward_time) in seconds
     """
+    print ("warmup")
+    optimizer = AdamW(model.parameters(), lr=1e-3)
     ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast else nullcontext()
     # Warmup
     with ctx: 
         for _ in range(warmup_steps):
+            lr = 0.1
+            for group in optimizer.param_groups:
+                group['lr'] = lr
             outputs = model(batch)
             if not forward_only:
+                optimizer.zero_grad()
                 loss = outputs.mean()
                 loss.backward()
+                optimizer.step()
             if device == "cuda":
                 torch.cuda.synchronize()
     
     # Benchmark
+    print ("benchmark:")
     forward_times = []
     backward_times = []
     with ctx: 
         for _ in range(benchmark_steps):
+            lr = 0.1
+            for group in optimizer.param_groups:
+                group["lr"] = lr
             # Forward pass
             start_time = timeit.default_timer()
             outputs = model(batch)
@@ -74,17 +86,34 @@ def benchmark_model(
             if not forward_only:
                 # Backward pass
                 start_time = timeit.default_timer()
+                optimizer.zero_grad()
                 loss = outputs.mean()
                 loss.backward()
+                optimizer.step()
                 if device == "cuda":
                     torch.cuda.synchronize()
                 backward_time = timeit.default_timer() - start_time
                 backward_times.append(backward_time)
+
+        torch.cuda.reset_peak_memory_stats()
+        outputs = model(batch)
+        torch.cuda.synchronize()
+        memory_before_backward = torch.cuda.max_memory_allocated()/(1024**3)
+
+        memory_backward=0
+        if not forward_only:
+            torch.cuda.reset_peak_memory_stats()
+            optimizer.zero_grad()
+            loss = outputs.mean()
+            loss.backward()
+            optimizer.step()
+            torch.cuda.synchronize()
+            memory_backward = torch.cuda.max_memory_allocated()/(1024**3)
     
     avg_forward_time = sum(forward_times) / len(forward_times)
     avg_backward_time = sum(backward_times) / len(backward_times) if not forward_only else 0.0
     
-    return avg_forward_time, avg_backward_time
+    return avg_forward_time, avg_backward_time, memory_before_backward, memory_backward
 
 
 
@@ -104,6 +133,8 @@ def main():
         d_ff=config["d_ff"],
         rope_theta=config["rope_theta"],
     ).to(config["device"])
+
+    #model = torch.compile(model)
     
     # Create random batch
     batch = create_random_batch(
@@ -114,8 +145,8 @@ def main():
     )
     
     # Run benchmarkl save
-    for autocast in [False, True]:
-        forward_time, backward_time = benchmark_model(
+    for autocast in [False]:
+        forward_time, backward_time, forward_memory, backward_memory = benchmark_model(
             model,
             batch,
             config["warmup_steps"],
@@ -137,6 +168,8 @@ def main():
         # print(f"  - Batch Size: {config['batch_size']}")
         print(f"\nTiming Results:")
         print(f"  - Average Forward Time: {forward_time*1000:.2f} ms")
+        print(f"forward peak memory: {forward_memory}")
+        print(f"backward memory:{backward_memory}")
         if not config["forward_only"]:
             print(f"  - Average Backward Time: {backward_time*1000:.2f} ms")
             print(f"  - Total Time: {(forward_time + backward_time)*1000:.2f} ms")
