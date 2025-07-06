@@ -1,0 +1,16 @@
+# Model hyperparameters
+vocab_size: 10000
+context_length: 128
+d_model: 2560
+num_layers: 32
+num_heads: 32
+d_ff: 10240
+rope_theta: 10000.0
+
+# Benchmarking parameters
+batch_size: 4
+warmup_steps: 0
+benchmark_steps: 3
+forward_only: true
+device: "cuda" 
+autocast: false

@@ -1,0 +1,6 @@
+d_model	seq_len	forward_time(ms)	backward_time(ms)	memory_before_backward(GB)	memory_in_backward(GB)	status
+128	256	0.14	0.74	0.0255	0.0491	Success
+128	1024	0.55	2.13	0.1799	0.3362	Success
+128	4096	6.74	20.69	2.1721	4.2971	Success
+128	8192	26.33	81.19	8.3284	16.5784	Success
+128	16384	OOM	OOM	OOM	OOM	OOM

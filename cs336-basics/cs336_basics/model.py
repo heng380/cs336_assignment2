@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from jaxtyping import Float, Bool, Int
+import torch.cuda.nvtx as nvtx
 
 
 from .nn_utils import softmax
@@ -426,8 +427,12 @@ def scaled_dot_product_attention(
 
     if mask is not None:
         attention_scores = torch.where(mask, attention_scores, float("-inf"))
-
+    torch.cuda.synchronize()
+    nvtx.range_push("softmax_start")
     attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension
+    torch.cuda.synchronize()
+    nvtx.range_pop()
+    
 
     return einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
 
@@ -486,7 +491,8 @@ class CausalMultiHeadSelfAttention(nn.Module):
         """
         *b, sequence_length, d_model = x.size()
         assert d_model == self.d_model
-
+        torch.cuda.synchronize()
+        nvtx.range_push("attention start")
         Q = self.q_proj(x)
         K = self.k_proj(x)
         V = self.v_proj(x)
@@ -521,6 +527,8 @@ class CausalMultiHeadSelfAttention(nn.Module):
 
         # Apply the output projection
         output = self.output_proj(attn_output)
+        torch.cuda.synchronize()
+        nvtx.range_pop()
         return output
 
 def silu(x: torch.Tensor):
