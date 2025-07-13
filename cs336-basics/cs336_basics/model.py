@@ -426,7 +426,7 @@ def scaled_dot_product_attention(
     attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
 
     if mask is not None:
-        attention_scores = torch.where(mask, attention_scores, float("-inf"))
+        attention_scores = torch.where(mask==0, attention_scores, float("-inf"))
     torch.cuda.synchronize()
     nvtx.range_push("softmax_start")
     attention_weights = softmax(attention_scores, dim=-1)  # Softmax over the key dimension

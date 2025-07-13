@@ -22,8 +22,8 @@ def flash_fwd_kernel(
     K_TILE_SIZE: tl.constexpr,
     is_causal:tl.constexpr
 ):
-    query_tile_index = tl.programax_id(0)
-    batch_index = tl.programax_id(1)
+    query_tile_index = tl.program_id(0)
+    batch_index = tl.program_id(1)
 
     Q_block_ptr = tl.make_block_ptr(
         Q_ptr + batch_index * stride_qb,
