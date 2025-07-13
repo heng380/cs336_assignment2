@@ -11,6 +11,6 @@ rope_theta: 10000.0
 batch_size: 32
 warmup_steps: 5
 benchmark_steps: 20
-forward_only: false
+forward_only: true
 device: "cuda" 
 autocast: false
