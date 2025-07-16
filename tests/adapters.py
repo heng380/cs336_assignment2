@@ -4,6 +4,7 @@ from typing import Type
 
 import torch
 from cs336_systems.flash_attention import FlashAttention2Forward, TritonFlashAttention2
+from cs336_systems.paralism.individual_ddp import individual_ddp
 
 
 def get_flashattention_autograd_function_pytorch() -> Type:
@@ -54,6 +55,7 @@ def get_ddp_individual_parameters(module: torch.nn.Module) -> torch.nn.Module:
     Returns:
         Instance of a DDP class.
     """
+    return individual_ddp(module)
     # For example: return DDPIndividualParameters(module)
     raise NotImplementedError
 
@@ -69,8 +71,9 @@ def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, opti
         optimizer: torch.optim.Optimizer
             Optimizer being used with the DDP-wrapped model.
     """
+    ddp_model.finish_gradient_synchronization()
     # For example: ddp_model.finish_gradient_synchronization()
-    raise NotImplementedError
+    # raise NotImplementedError
 
 
 def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn.Module:

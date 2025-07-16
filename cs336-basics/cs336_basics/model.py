@@ -421,9 +421,13 @@ def scaled_dot_product_attention(
         with the output of running your scaled dot product attention
         implementation with the provided key, query, and value tensors.
     """
-
+    torch.cuda.synchronize()
+    nvtx.range_push("attention QKT start")
     d_k = K.shape[-1]
     attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
+
+    torch.cuda.synchronize()
+    nvtx.range_pop()
 
     if mask is not None:
         attention_scores = torch.where(mask==0, attention_scores, float("-inf"))
@@ -433,8 +437,12 @@ def scaled_dot_product_attention(
     torch.cuda.synchronize()
     nvtx.range_pop()
     
-
-    return einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+    torch.cuda.synchronize()
+    nvtx.range_push("attention V start")
+    output = einsum(attention_weights, V, "... query key, ... key d_v ->  ... query d_v")
+    torch.cuda.synchronize()
+    nvtx.range_pop()
+    return output
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
@@ -493,16 +501,23 @@ class CausalMultiHeadSelfAttention(nn.Module):
         assert d_model == self.d_model
         torch.cuda.synchronize()
         nvtx.range_push("attention start")
+        nvtx.range_push("QKV matmul start")
         Q = self.q_proj(x)
         K = self.k_proj(x)
         V = self.v_proj(x)
+        torch.cuda.synchronize()
+        nvtx.range_pop()
 
+        nvtx.range_push("QKV reshape start")
         # Take apart each head from the embedding dimension of Q, K, V to shape (..., num_heads, seq_len, d_k).
         Q, K, V = (
             rearrange(X, "... seq (heads d) -> ... heads seq d", heads=self.num_heads)
             for X in (Q, K, V)
         )  # fmt: skip
+        torch.cuda.synchronize()
+        nvtx.range_pop()
 
+        nvtx.range_push("positional encoding start")
         if token_positions is None:
             token_positions = einx.rearrange("seq -> b... seq", torch.arange(sequence_length, device=x.device), b=[1] * len(b))
 
@@ -511,12 +526,16 @@ class CausalMultiHeadSelfAttention(nn.Module):
 
         Q = self.positional_encoder(Q, token_positions)
         K = self.positional_encoder(K, token_positions)
-
+        torch.cuda.synchronize()
+        nvtx.range_pop()
         # Construct causal mask
+        nvtx.range_push("causal mask start")
         seq = torch.arange(sequence_length, device=x.device)
         qi = einx.rearrange('query -> b... 1 query 1', seq, b=[1] * len(b))
         kj = einx.rearrange('key   -> b... 1 1   key', seq, b=[1] * len(b))
         causal_mask = qi >= kj  # (query, key)
+        torch.cuda.synchronize()
+        nvtx.range_pop()
 
         # Shape: (..., num_heads, sequence_length, d_k)
         attn_output = scaled_dot_product_attention(K=K, Q=Q, V=V, mask=causal_mask)
@@ -526,7 +545,11 @@ class CausalMultiHeadSelfAttention(nn.Module):
         attn_output = rearrange(attn_output, "batch heads seq d_v -> batch seq (heads d_v)").contiguous()
 
         # Apply the output projection
+        torch.cuda.synchronize()
+        nvtx.range_push("output projection start")
         output = self.output_proj(attn_output)
+        torch.cuda.synchronize()
+        nvtx.range_pop()
         torch.cuda.synchronize()
         nvtx.range_pop()
         return output
