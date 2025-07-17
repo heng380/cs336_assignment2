@@ -4,8 +4,9 @@ from typing import Type
 
 import torch
 from cs336_systems.flash_attention import FlashAttention2Forward, TritonFlashAttention2
-from cs336_systems.paralism.individual_ddp import individual_ddp
-
+from cs336_systems.paralism.individual_ddp import IndividualDDP
+from cs336_systems.paralism.individual_bucketed_ddp import DDP_Bucketed
+from cs336_systems.paralism.optimizer_sharding import OptimizerSharding
 
 def get_flashattention_autograd_function_pytorch() -> Type:
     """
@@ -55,7 +56,7 @@ def get_ddp_individual_parameters(module: torch.nn.Module) -> torch.nn.Module:
     Returns:
         Instance of a DDP class.
     """
-    return individual_ddp(module)
+    return IndividualDDP(module)
     # For example: return DDPIndividualParameters(module)
     raise NotImplementedError
 
@@ -94,6 +95,7 @@ def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn
     Returns:
         Instance of a DDP class.
     """
+    return DDP_Bucketed(module, bucket_size_mb)
     raise NotImplementedError
 
 
@@ -109,6 +111,7 @@ def ddp_bucketed_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.
             Optimizer being used with the DDP-wrapped model.
     """
     # For example: ddp_model.finish_gradient_synchronization()
+    return ddp_model.finish_gradient_synchronization()
     raise NotImplementedError
 
 
@@ -141,4 +144,5 @@ def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **
     Returns:
         Instance of sharded optimizer.
     """
+    return OptimizerSharding(params, optimizer_cls, **kwargs)
     raise NotImplementedError

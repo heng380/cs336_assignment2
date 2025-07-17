@@ -10,6 +10,7 @@ from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
 from timeit import default_timer as timer
 from individual_ddp import IndividualDDP
+from individual_bucketed_ddp import DDP_Bucketed
 
 
 def setup(rank, world_size):
@@ -17,6 +18,36 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "29500"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+
+def bucketed_ddp(model, data, optimizer, num_trails, num_warmup_trails, step_times, comms_times, bucket_size_mb):
+    print ("warmup:")
+    model = DDP_Bucketed(model, bucket_size_mb)
+    for _ in range(num_warmup_trails):
+        optimizer.zero_grad()
+        output = model(data)
+        loss = output.mean()
+        loss.backward()
+        model.finish_gradient_synchronization()
+        optimizer.step()
+    
+    print ("benchmarking:")
+    for _ in range(num_trails):
+        torch.cuda.synchronize()
+        step_start_time = timer()
+
+        optimizer.zero_grad()
+        output = model(data)
+        loss = output.mean()
+        loss.backward()
+        torch.cuda.synchronize()
+        comms_start_time = timer()
+        model.finish_gradient_synchronization()
+        torch.cuda.synchronize()
+        comms_times.append(timer() - comms_start_time)
+
+        optimizer.step()
+        torch.cuda.synchronize()
+        step_times.append(timer() - step_start_time)
 
 def individual_ddp(model, data, optimizer, num_trails, num_warmup_trails, step_times, comms_times):
     print ("warmup:")
@@ -159,7 +190,9 @@ def benchmark_driver(rank, world_size, data, num_layers, batch_size,
         flat_ddp(transformer, data, optimizer, num_trails, num_warmup_trails, step_times, comms_times)
     if ddp_type == "individual_ddp":
         individual_ddp(transformer, data, optimizer, num_trails, num_warmup_trails, step_times, comms_times)
-        
+    if ddp_type == "bucketed_ddp":
+        bucketed_ddp(transformer, data, optimizer, num_trails, num_warmup_trails, step_times, comms_times, bucket_size_mb)
+
     step_time = torch.tensor(step_times, device=device)
     gathered_steps = [torch.zeros_like(step_time) for _ in range(world_size)]
     dist.all_gather(gathered_steps, step_time)
